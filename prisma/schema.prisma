@@ -1,0 +1,78 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum NotifyMode {
+  REALTIME
+  DAILY_SUMMARY
+}
+
+enum NotificationType {
+  MATCH
+  RANK_CHANGE
+  LIVE_GAME
+}
+
+enum NotificationStatus {
+  PENDING
+  SENT
+}
+
+model Player {
+  id                 String              @id @default(cuid())
+  riotId             String
+  tagLine            String
+  puuid              String              @unique
+  tier               String?
+  rank               String?
+  lp                 Int                 @default(0)
+  currentGameId      String?
+  notifyMode         NotifyMode          @default(REALTIME)
+  matches            Match[]
+  rankSnapshots      RankSnapshot[]
+  notificationEvents NotificationEvent[]
+}
+
+model Match {
+  id         String   @id @default(cuid())
+  matchId    String   @unique
+  player     Player   @relation(fields: [playerId], references: [id])
+  playerId   String
+  win        Boolean
+  kills      Int
+  deaths     Int
+  assists    Int
+  champion   String
+  playedAt   DateTime
+}
+
+model RankSnapshot {
+  id         String   @id @default(cuid())
+  player     Player   @relation(fields: [playerId], references: [id])
+  playerId   String
+  tier       String
+  rank       String
+  lp         Int
+  lpChange   Int
+  lpBalance  Int
+  capturedAt DateTime @default(now())
+}
+
+model NotificationEvent {
+  id          String             @id @default(cuid())
+  player      Player             @relation(fields: [playerId], references: [id])
+  playerId    String
+  type        NotificationType
+  referenceId String
+  payload     Json
+  status      NotificationStatus @default(PENDING)
+  createdAt   DateTime           @default(now())
+  sentAt      DateTime?
+
+  @@unique([playerId, type, referenceId])
+}

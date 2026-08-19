@@ -1,0 +1,25 @@
+{
+  "name": "perainda-tracker",
+  "version": "1.0.0",
+  "description": "Monitora jogadores de League of Legends e envia notificacoes de partidas e rank via Discord/WhatsApp.",
+  "main": "dist/index.js",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "devDependencies": {
+    "@types/node": "^26.2.0",
+    "prisma": "^6.19.3",
+    "tsx": "^4.23.12",
+    "typescript": "^7.0.2"
+  },
+  "dependencies": {
+    "@prisma/client": "^6.19.3",
+    "dotenv": "^17.4.2"
+  }
+}
