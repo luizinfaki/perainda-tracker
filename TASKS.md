@@ -24,15 +24,16 @@ Referência de arquitetura/schema: `CLAUDE.MD`.
 - [x] Testado manualmente contra a API real (`src/riot/manual-test.ts`, conta Srprepucio#666) — os 6 wrappers funcionando ponta a ponta.
 
 ## Fase 2 — Cadastro de Players
-- [ ] Script simples (CLI ou seed) pra cadastrar um player: recebe `gameName#tagLine`, busca PUUID + Summoner ID, salva no banco com `notifyMode` default.
-- [ ] Cadastrar os players do grupo pra testar o resto do fluxo.
+- [x] Script CLI `src/scripts/register-player.ts`: recebe `gameName#tagLine` (e opcionalmente `REALTIME`/`DAILY_SUMMARY`), busca PUUID via Account-V1 e rank via League-V4 (`by-puuid`), faz upsert do `Player` e cria o `RankSnapshot` inicial (baseline, `lpChange`/`lpBalance` = 0) na primeira vez. Idempotente — rodar de novo não duplica player nem snapshot.
+- [x] Cadastrar os players do grupo: Srprepucio#666, Trakinas2202#BR1, Perainda Aura#DAVAS.
 
 ## Fase 3 — Job de Polling
-- [ ] Função que itera os players cadastrados.
-- [ ] Buscar novas partidas → salvar em `Match` → criar `NotificationEvent` tipo `MATCH`.
-- [ ] Buscar rank atual → comparar com último `RankSnapshot` → se mudou, calcular `lpChange`/`lpBalance`, salvar snapshot, criar `NotificationEvent` tipo `RANK_CHANGE`.
-- [ ] Consultar spectator → se entrou/saiu de partida, atualizar `currentGameId`, criar `NotificationEvent` tipo `LIVE_GAME` quando entrar.
-- [ ] Agendar com `node-cron` (ex: a cada 5 minutos) rodando dentro do processo.
+- [x] `pollAllPlayers()` em `src/jobs/pollPlayers.ts` itera os players cadastrados (com try/catch por player, um erro não trava os outros).
+- [x] Busca novas partidas (últimas 10) → salva em `Match` (upsert por `matchId`, idempotente) → cria `NotificationEvent` tipo `MATCH`.
+- [x] Busca rank atual (League-V4 by-puuid) → compara com último `RankSnapshot` usando `src/riot/rank.ts` (`rankToValue`, considera troca de divisão/tier) → se mudou, calcula `lpChange`/`lpBalance`, salva snapshot, cria `NotificationEvent` tipo `RANK_CHANGE`.
+- [x] Consulta Spectator → se entrou/saiu de partida, atualiza `currentGameId`, cria `NotificationEvent` tipo `LIVE_GAME` quando entra numa partida nova.
+- [x] `src/jobs/scheduler.ts` agenda com `node-cron` a cada 5 min (`POLL_CRON_EXPRESSION`, configurável). `src/index.ts` roda um polling imediato ao iniciar e depois agenda os próximos.
+- [x] Testado contra a API real com os 3 players cadastrados: 23 partidas novas detectadas e salvas na primeira rodada; segunda rodada não duplicou nada (idempotência confirmada).
 
 ## Fase 4 — Notificações
 - [ ] Função de envio pro Discord via webhook (mensagem formatada por tipo de evento).
