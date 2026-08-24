@@ -40,7 +40,7 @@ model Player {
 
 model Match {
   id         String   @id @default(cuid())
-  matchId    String   @unique
+  matchId    String
   player     Player   @relation(fields: [playerId], references: [id])
   playerId   String
   win        Boolean
@@ -49,6 +49,9 @@ model Match {
   assists    Int
   champion   String
   playedAt   DateTime
+  remake     Boolean  @default(false)
+
+  @@unique([playerId, matchId])
 }
 
 model RankSnapshot {

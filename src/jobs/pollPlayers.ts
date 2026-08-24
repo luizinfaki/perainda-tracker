@@ -7,8 +7,10 @@ import {
   getActiveGameByPuuid,
 } from "../riot/endpoints";
 import { rankToValue } from "../riot/rank";
+import { CHALLENGE_START } from "./leaderboard";
 
 const RANKED_SOLO_QUEUE = "RANKED_SOLO_5x5";
+const RANKED_SOLO_QUEUE_ID = 420; // único tipo de partida que a gente rastreia/notifica
 const MATCHES_PER_POLL = 10;
 
 export async function pollAllPlayers(): Promise<void> {
@@ -26,19 +28,79 @@ export async function pollAllPlayers(): Promise<void> {
 
 async function pollPlayer(player: Player): Promise<void> {
   await pollMatches(player);
-  await pollRank(player);
+  await pollRankDecay(player);
   await pollLiveGame(player);
 }
 
+interface RankDelta {
+  hasChange: boolean;
+  tierBefore: string;
+  rankBefore: string;
+  lpBefore: number;
+  tierAfter: string;
+  rankAfter: string;
+  lpAfter: number;
+  lpChange: number;
+  lpBalance: number;
+}
+
+/**
+ * Busca o rank atual e sincroniza com o último RankSnapshot. Só grava um snapshot novo se
+ * realmente mudou algo (ou for o baseline) — evita gerar histórico duplicado a cada polling.
+ */
+async function syncRank(player: Player): Promise<RankDelta | null> {
+  const entries = await getLeagueEntriesByPuuid(player.puuid);
+  const solo = entries.find((entry) => entry.queueType === RANKED_SOLO_QUEUE);
+  if (!solo) return null;
+
+  const lastSnapshot = await prisma.rankSnapshot.findFirst({
+    where: { playerId: player.id },
+    orderBy: { capturedAt: "desc" },
+  });
+
+  const newValue = rankToValue(solo.tier, solo.rank, solo.leaguePoints);
+  const oldValue = lastSnapshot ? rankToValue(lastSnapshot.tier, lastSnapshot.rank, lastSnapshot.lp) : newValue;
+  const lpChange = newValue - oldValue;
+  const isBaseline = !lastSnapshot;
+
+  await prisma.player.update({
+    where: { id: player.id },
+    data: { tier: solo.tier, rank: solo.rank, lp: solo.leaguePoints },
+  });
+
+  const lpBalance = (lastSnapshot?.lpBalance ?? 0) + lpChange;
+
+  if (isBaseline || lpChange !== 0) {
+    await prisma.rankSnapshot.create({
+      data: { playerId: player.id, tier: solo.tier, rank: solo.rank, lp: solo.leaguePoints, lpChange, lpBalance },
+    });
+  }
+
+  return {
+    hasChange: !isBaseline && lpChange !== 0,
+    tierBefore: lastSnapshot?.tier ?? solo.tier,
+    rankBefore: lastSnapshot?.rank ?? solo.rank,
+    lpBefore: lastSnapshot?.lp ?? solo.leaguePoints,
+    tierAfter: solo.tier,
+    rankAfter: solo.rank,
+    lpAfter: solo.leaguePoints,
+    lpChange,
+    lpBalance,
+  };
+}
+
 async function pollMatches(player: Player): Promise<void> {
-  const matchIds = await getMatchIdsByPuuid(player.puuid, { count: MATCHES_PER_POLL });
+  const matchIds = await getMatchIdsByPuuid(player.puuid, {
+    count: MATCHES_PER_POLL,
+    queue: RANKED_SOLO_QUEUE_ID,
+  });
 
   const existing = await prisma.match.findMany({
-    where: { matchId: { in: matchIds } },
+    where: { playerId: player.id, matchId: { in: matchIds } },
     select: { matchId: true },
   });
   const existingIds = new Set(existing.map((m) => m.matchId));
-  const newMatchIds = matchIds.filter((id) => !existingIds.has(id));
+  const newMatchIds = matchIds.filter((id) => !existingIds.has(id)).reverse(); // mais antiga primeiro
 
   for (const matchId of newMatchIds) {
     const matchDetail = await getMatchById(matchId);
@@ -46,9 +108,10 @@ async function pollMatches(player: Player): Promise<void> {
     if (!participant) continue;
 
     const playedAt = new Date(matchDetail.info.gameEndTimestamp ?? matchDetail.info.gameCreation);
+    const isRemake = participant.gameEndedInEarlySurrender;
 
     await prisma.match.upsert({
-      where: { matchId },
+      where: { playerId_matchId: { playerId: player.id, matchId } },
       update: {},
       create: {
         matchId,
@@ -59,8 +122,31 @@ async function pollMatches(player: Player): Promise<void> {
         assists: participant.assists,
         champion: participant.championName,
         playedAt,
+        remake: isRemake,
       },
     });
+
+    // Busca o rank logo após a partida, pra amarrar o ganho/perda de LP a essa partida específica.
+    // Remake nunca afeta LP, então nem vale gastar uma chamada à Riot API pra isso.
+    const rankDelta = isRemake ? null : await syncRank(player);
+
+    const totalTracked = await prisma.match.count({
+      where: { playerId: player.id, playedAt: { gte: CHALLENGE_START }, remake: false },
+    });
+    const winsTracked = await prisma.match.count({
+      where: { playerId: player.id, win: true, playedAt: { gte: CHALLENGE_START }, remake: false },
+    });
+
+    const multikill =
+      participant.pentaKills > 0
+        ? "Pentakill!"
+        : participant.quadraKills > 0
+          ? "Quadrakill!"
+          : participant.tripleKills > 0
+            ? "Triplekill!"
+            : participant.doubleKills > 0
+              ? "Doublekill!"
+              : null;
 
     await prisma.notificationEvent.upsert({
       where: {
@@ -78,6 +164,54 @@ async function pollMatches(player: Player): Promise<void> {
           deaths: participant.deaths,
           assists: participant.assists,
           playedAt: playedAt.toISOString(),
+          position: participant.teamPosition,
+          level: participant.champLevel,
+          killParticipation: participant.challenges?.killParticipation ?? null,
+          cs: participant.totalMinionsKilled + participant.neutralMinionsKilled,
+          damage: participant.totalDamageDealtToChampions,
+          durationSeconds: matchDetail.info.gameDuration,
+          items: [
+            participant.item0,
+            participant.item1,
+            participant.item2,
+            participant.item3,
+            participant.item4,
+            participant.item5,
+            participant.item6,
+          ],
+          goldEarned: participant.goldEarned,
+          visionScore: participant.visionScore,
+          wardsPlaced: participant.wardsPlaced,
+          wardsKilled: participant.wardsKilled,
+          totalDamageTaken: participant.totalDamageTaken,
+          totalHeal: participant.totalHeal,
+          multikill,
+          remake: isRemake,
+          rank: rankDelta?.hasChange
+            ? {
+                tierBefore: rankDelta.tierBefore,
+                rankBefore: rankDelta.rankBefore,
+                lpBefore: rankDelta.lpBefore,
+                tierAfter: rankDelta.tierAfter,
+                rankAfter: rankDelta.rankAfter,
+                lpAfter: rankDelta.lpAfter,
+                lpChange: rankDelta.lpChange,
+                lpBalance: rankDelta.lpBalance,
+              }
+            : null,
+          winsTracked,
+          totalTracked,
+          participants: matchDetail.info.participants.map((p) => ({
+            name: p.riotIdGameName || "?",
+            champion: p.championName,
+            kills: p.kills,
+            deaths: p.deaths,
+            assists: p.assists,
+            teamId: p.teamId,
+            win: p.win,
+            items: [p.item0, p.item1, p.item2, p.item3, p.item4, p.item5, p.item6],
+            isTracked: p.puuid === player.puuid,
+          })),
         },
       },
     });
@@ -88,59 +222,49 @@ async function pollMatches(player: Player): Promise<void> {
   }
 }
 
-async function pollRank(player: Player): Promise<void> {
-  const entries = await getLeagueEntriesByPuuid(player.puuid);
-  const solo = entries.find((entry) => entry.queueType === RANKED_SOLO_QUEUE);
-  if (!solo) return;
+/** Fallback: detecta mudança de LP sem partida associada (ex: decay por inatividade). */
+async function pollRankDecay(player: Player): Promise<void> {
+  const lastSnapshotBefore = await prisma.rankSnapshot.findFirst({
+    where: { playerId: player.id },
+    orderBy: { capturedAt: "desc" },
+  });
+  if (!lastSnapshotBefore) return; // sem baseline ainda, pollMatches/registro cuida disso
 
-  const lastSnapshot = await prisma.rankSnapshot.findFirst({
+  const delta = await syncRank(player);
+  if (!delta || !delta.hasChange) return;
+
+  const totalTracked = await prisma.match.count({
+    where: { playerId: player.id, playedAt: { gte: CHALLENGE_START }, remake: false },
+  });
+  const winsTracked = await prisma.match.count({
+    where: { playerId: player.id, win: true, playedAt: { gte: CHALLENGE_START }, remake: false },
+  });
+
+  const latestSnapshot = await prisma.rankSnapshot.findFirst({
     where: { playerId: player.id },
     orderBy: { capturedAt: "desc" },
   });
 
-  const newValue = rankToValue(solo.tier, solo.rank, solo.leaguePoints);
-  const oldValue = lastSnapshot ? rankToValue(lastSnapshot.tier, lastSnapshot.rank, lastSnapshot.lp) : newValue;
-  const lpChange = newValue - oldValue;
-
-  await prisma.player.update({
-    where: { id: player.id },
-    data: { tier: solo.tier, rank: solo.rank, lp: solo.leaguePoints },
+  await prisma.notificationEvent.create({
+    data: {
+      playerId: player.id,
+      type: "RANK_CHANGE",
+      referenceId: latestSnapshot!.id,
+      payload: {
+        tier: delta.tierAfter,
+        rank: delta.rankAfter,
+        lp: delta.lpAfter,
+        lpChange: delta.lpChange,
+        lpBalance: delta.lpBalance,
+        winsTracked,
+        totalTracked,
+      },
+    },
   });
 
-  if (!lastSnapshot || lpChange !== 0) {
-    const lpBalance = (lastSnapshot?.lpBalance ?? 0) + lpChange;
-
-    const snapshot = await prisma.rankSnapshot.create({
-      data: {
-        playerId: player.id,
-        tier: solo.tier,
-        rank: solo.rank,
-        lp: solo.leaguePoints,
-        lpChange,
-        lpBalance,
-      },
-    });
-
-    if (lastSnapshot) {
-      await prisma.notificationEvent.create({
-        data: {
-          playerId: player.id,
-          type: "RANK_CHANGE",
-          referenceId: snapshot.id,
-          payload: {
-            tier: solo.tier,
-            rank: solo.rank,
-            lp: solo.leaguePoints,
-            lpChange,
-            lpBalance,
-          },
-        },
-      });
-      console.log(
-        `[poll] Mudança de rank p/ ${player.riotId}: ${solo.tier} ${solo.rank} ${solo.leaguePoints}LP (${lpChange >= 0 ? "+" : ""}${lpChange}, saldo ${lpBalance})`
-      );
-    }
-  }
+  console.log(
+    `[poll] Mudança de rank sem partida associada p/ ${player.riotId} (provável decay): ${delta.tierAfter} ${delta.rankAfter} ${delta.lpAfter}LP (${delta.lpChange})`
+  );
 }
 
 async function pollLiveGame(player: Player): Promise<void> {
@@ -158,6 +282,8 @@ async function pollLiveGame(player: Player): Promise<void> {
 
   await prisma.player.update({ where: { id: player.id }, data: { currentGameId: gameId } });
 
+  if (activeGame.gameQueueConfigId !== RANKED_SOLO_QUEUE_ID) return;
+
   await prisma.notificationEvent.upsert({
     where: {
       playerId_type_referenceId: { playerId: player.id, type: "LIVE_GAME", referenceId: gameId },
@@ -167,9 +293,19 @@ async function pollLiveGame(player: Player): Promise<void> {
       playerId: player.id,
       type: "LIVE_GAME",
       referenceId: gameId,
-      payload: { gameId, gameStartTime: activeGame.gameStartTime },
+      payload: {
+        gameId,
+        gameStartTime: activeGame.gameStartTime,
+        gameQueueConfigId: activeGame.gameQueueConfigId,
+        participants: activeGame.participants.map((p) => ({
+          name: p.riotId,
+          championId: p.championId,
+          teamId: p.teamId,
+          isTracked: p.puuid === player.puuid,
+        })),
+      },
     },
   });
 
-  console.log(`[poll] ${player.riotId} entrou em partida ao vivo (gameId ${gameId}).`);
+  console.log(`[poll] ${player.riotId} entrou em partida ranqueada ao vivo (gameId ${gameId}).`);
 }
