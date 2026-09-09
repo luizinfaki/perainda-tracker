@@ -89,5 +89,20 @@ export async function registerSlashCommands(): Promise<void> {
     channel.guildId
   );
 
-  console.log("[discord-bot] Slash commands /rank e /historico registrados.");
+  await getClient().application?.commands.create(
+    {
+      name: "resumo",
+      description: "Resumo estilo op.gg desde o início do desafio",
+      options: [
+        {
+          name: "player",
+          description: "Riot ID de um player específico (vazio = resumo do grupo)",
+          type: ApplicationCommandOptionType.String,
+        },
+      ],
+    },
+    channel.guildId
+  );
+
+  console.log("[discord-bot] Slash commands /rank, /historico e /resumo registrados.");
 }

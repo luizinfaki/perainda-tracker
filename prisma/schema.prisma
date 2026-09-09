@@ -51,7 +51,20 @@ model Match {
   playedAt   DateTime
   remake     Boolean  @default(false)
 
+  // Detalhe da partida (preenchido pelo polling e pelo backfill; nullable pros registros antigos).
+  queueId           Int?
+  position          String? // teamPosition: TOP/JUNGLE/MIDDLE/BOTTOM/UTILITY
+  teamId            Int? // 100 = azul, 200 = vermelho
+  cs                Int? // totalMinionsKilled + neutralMinionsKilled
+  durationSeconds   Int?
+  killParticipation Float? // 0–1
+  goldEarned        Int?
+  visionScore       Int?
+  allies            Json? // [{ name, champion, kills, deaths, assists, win }] — os 4 aliados
+  detailFetchedAt   DateTime? // marca que os campos acima foram preenchidos
+
   @@unique([playerId, matchId])
+  @@index([playerId, playedAt])
 }
 
 model RankSnapshot {

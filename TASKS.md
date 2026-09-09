@@ -69,8 +69,28 @@ Referência de arquitetura/schema: `CLAUDE.MD`.
 - [x] Script de preview local: `npx tsx src/scripts/rank-chart-once.ts [semanal|diario|mensal] [riotId]`
   → grava `rank-chart.png`.
 - [x] Anexo opcional do gráfico semanal no leaderboard diário, atrás de `LEADERBOARD_CHART=1`.
-- [ ] Encher o histórico: hoje só tem ~5 dias de dados reais (19–23/08) porque o polling
-  não ficou rodando. Depende da Fase 5 (deixar o processo de pé) pro gráfico ganhar corpo.
+- [x] Histórico encheu sozinho — o processo ficou de pé na VPS, ~250 partidas e 3 semanas
+  de `RankSnapshot` até 09/09.
+
+## Fase 8 — Comando `/resumo` (estilo op.gg) + backfill de detalhe das partidas
+- [x] `Match` ganhou colunas de detalhe (`queueId`, `position`, `teamId`, `cs`,
+  `durationSeconds`, `killParticipation`, `goldEarned`, `visionScore`, `allies` Json,
+  `detailFetchedAt`) + `@@index([playerId, playedAt])` (migration `match_detail_columns`).
+  Antes esses dados só existiam no `payload` da notificação.
+- [x] `src/riot/matchDetail.ts`: `extractMatchDetail()` centraliza a extração (usada pelo
+  polling e pelo backfill).
+- [x] `src/jobs/pollPlayers.ts`: o `match.upsert` grava as colunas novas daqui pra frente.
+- [x] `src/scripts/backfill-match-details.ts`: puxa da Match-V5 todas as partidas do
+  desafio (paginado, `startTime`), cria as que faltam e preenche o detalhe. Idempotente
+  (`--all` refaz tudo). Rodar **uma vez** por deploy: `node dist/scripts/backfill-match-details.js`.
+- [x] `src/util/time.ts`: helper de fuso `America/Sao_Paulo` (extraído de `rankHistory.ts`).
+- [x] `src/jobs/playerSummary.ts`: `buildPlayerSummary` / `buildGroupSummary` — tabela de
+  campeões, métricas gerais, atividade (dia/hora), duos e rotas, tudo desde `CHALLENGE_START`.
+- [x] `src/notifications/summaryEmbed.ts`: embed individual e de grupo (tabelas monospace,
+  barras em bloco).
+- [x] Slash command `/resumo player:[Riot ID opcional]` (`discordBot.ts` + `interactions.ts`).
+  Sem `player` = resumo comparativo do grupo. Helper `resolvePlayer` compartilhado com `/historico`.
+- [x] Preview local: `npx tsx src/scripts/summary-once.ts [riotId]`.
 
 ## Depois (fora do escopo inicial)
 - [ ] Integração WhatsApp.

@@ -19,6 +19,7 @@ export function getLeagueEntriesByPuuid(puuid: string): Promise<LeagueEntry[]> {
 
 export interface MatchIdsFilter {
   count?: number; // default 20, máximo 100
+  start?: number; // offset de paginação (default 0)
   queue?: number; // ex: 420 = Ranked Solo/Duo, 440 = Ranked Flex, 450 = ARAM
   startTime?: number; // epoch em segundos — só partidas jogadas a partir daqui
 }
@@ -26,6 +27,7 @@ export interface MatchIdsFilter {
 export function getMatchIdsByPuuid(puuid: string, filter: MatchIdsFilter = {}): Promise<string[]> {
   const params = new URLSearchParams();
   params.set("count", String(filter.count ?? 20));
+  if (filter.start !== undefined) params.set("start", String(filter.start));
   if (filter.queue !== undefined) params.set("queue", String(filter.queue));
   if (filter.startTime !== undefined) params.set("startTime", String(filter.startTime));
 

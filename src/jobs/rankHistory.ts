@@ -1,6 +1,7 @@
 import { RankSnapshot } from "@prisma/client";
 import { prisma } from "../db/client";
 import { rankToValue } from "../riot/rank";
+import { saoPauloYmd, saoPauloMidnight } from "../util/time";
 
 export type Granularity = "daily" | "weekly" | "monthly";
 
@@ -9,8 +10,6 @@ export const GRANULARITY_PT: Record<Granularity, string> = {
   weekly: "semanal",
   monthly: "mensal",
 };
-
-const TZ = "America/Sao_Paulo";
 
 /** Quanto de histórico puxar por modo. Os dados são rasos (~semanas), então nem precisa de muito. */
 const RANGE_DAYS: Record<Granularity, number> = {
@@ -40,56 +39,31 @@ function pad(n: number): string {
   return String(n).padStart(2, "0");
 }
 
-/** Ano/mês/dia no fuso de São Paulo pra um instante qualquer. */
-function localYmd(d: Date): [number, number, number] {
-  const parts = new Intl.DateTimeFormat("en-CA", {
-    timeZone: TZ,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).format(d);
-  const [y, m, day] = parts.split("-").map(Number);
-  return [y, m, day];
-}
-
-/** Diferença entre horário local no TZ e UTC pro instante d (São Paulo = -3h, sem horário de verão). */
-function tzOffsetMs(d: Date): number {
-  const local = new Date(d.toLocaleString("en-US", { timeZone: TZ }));
-  const utc = new Date(d.toLocaleString("en-US", { timeZone: "UTC" }));
-  return local.getTime() - utc.getTime();
-}
-
-/** Instante correspondente à meia-noite local (TZ) de uma data-calendário. */
-function localMidnight(y: number, m: number, day: number): Date {
-  const guess = new Date(Date.UTC(y, m - 1, day));
-  return new Date(guess.getTime() - tzOffsetMs(guess));
-}
-
 interface Period {
   key: string;
   start: Date;
 }
 
 function periodOf(d: Date, g: Granularity): Period {
-  const [y, m, day] = localYmd(d);
+  const [y, m, day] = saoPauloYmd(d);
 
   if (g === "monthly") {
-    return { key: `${y}-${pad(m)}`, start: localMidnight(y, m, 1) };
+    return { key: `${y}-${pad(m)}`, start: saoPauloMidnight(y, m, 1) };
   }
   if (g === "daily") {
-    return { key: `${y}-${pad(m)}-${pad(day)}`, start: localMidnight(y, m, day) };
+    return { key: `${y}-${pad(m)}-${pad(day)}`, start: saoPauloMidnight(y, m, day) };
   }
 
   // weekly: segunda-feira da semana local
-  const midnight = localMidnight(y, m, day);
+  const midnight = saoPauloMidnight(y, m, day);
   const dowMondayZero = (midnight.getUTCDay() + 6) % 7; // getUTCDay: 0=domingo -> 0=segunda
   const monday = new Date(midnight.getTime() - dowMondayZero * 86_400_000);
-  const [wy, wm, wd] = localYmd(monday);
-  return { key: `${wy}-${pad(wm)}-${pad(wd)}`, start: localMidnight(wy, wm, wd) };
+  const [wy, wm, wd] = saoPauloYmd(monday);
+  return { key: `${wy}-${pad(wm)}-${pad(wd)}`, start: saoPauloMidnight(wy, wm, wd) };
 }
 
 function labelFor(start: Date): string {
-  const [, m, day] = localYmd(start);
+  const [, m, day] = saoPauloYmd(start);
   return `${pad(day)}/${pad(m)}`;
 }
 

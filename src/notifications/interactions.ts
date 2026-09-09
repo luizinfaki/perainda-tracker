@@ -12,30 +12,64 @@ import { buildLeaderboard, CHALLENGE_START } from "../jobs/leaderboard";
 import { buildLeaderboardEmbed } from "./leaderboard";
 import { buildRankHistory, Granularity, GRANULARITY_PT } from "../jobs/rankHistory";
 import { renderRankHistoryPng } from "./rankChart";
+import { buildPlayerSummary, buildGroupSummary } from "../jobs/playerSummary";
+import { buildPlayerSummaryEmbed, buildGroupSummaryEmbed } from "./summaryEmbed";
 
 const ALL_PLAYERS_ALIASES = new Set(["todos", "todas", "all", "grupo"]);
+
+type ResolvedPlayer =
+  | { kind: "group" }
+  | { kind: "player"; id: string; riotId: string }
+  | { kind: "notfound"; raw: string };
+
+/** Lê a opção `player` do comando: vazio/"todos" = grupo; senão resolve pelo riotId. */
+async function resolvePlayer(interaction: ChatInputCommandInteraction): Promise<ResolvedPlayer> {
+  const raw = interaction.options.getString("player")?.trim();
+  if (!raw || ALL_PLAYERS_ALIASES.has(raw.toLowerCase())) return { kind: "group" };
+
+  const name = raw.split("#")[0].trim();
+  const player = await prisma.player.findFirst({
+    where: { riotId: { equals: name, mode: "insensitive" } },
+  });
+  if (!player) return { kind: "notfound", raw };
+  return { kind: "player", id: player.id, riotId: player.riotId };
+}
+
+async function handleResumo(interaction: ChatInputCommandInteraction): Promise<void> {
+  await interaction.deferReply();
+  const target = await resolvePlayer(interaction);
+
+  if (target.kind === "notfound") {
+    await interaction.editReply(`Não achei nenhum player com o Riot ID "${target.raw}".`);
+    return;
+  }
+
+  if (target.kind === "player") {
+    const summary = await buildPlayerSummary(target.id);
+    if (!summary || summary.general.games === 0) {
+      await interaction.editReply(`Sem partidas de ${target.riotId} desde o início do desafio.`);
+      return;
+    }
+    await interaction.editReply({ embeds: [buildPlayerSummaryEmbed(summary)] });
+    return;
+  }
+
+  const summaries = await buildGroupSummary();
+  await interaction.editReply({ embeds: [buildGroupSummaryEmbed(summaries)] });
+}
 
 async function handleHistorico(interaction: ChatInputCommandInteraction): Promise<void> {
   await interaction.deferReply();
 
   const periodo = (interaction.options.getString("periodo") ?? "weekly") as Granularity;
 
-  const rawPlayer = interaction.options.getString("player")?.trim();
-  let playerIds: string[] | undefined;
-  let scopeLabel = "grupo";
-
-  if (rawPlayer && !ALL_PLAYERS_ALIASES.has(rawPlayer.toLowerCase())) {
-    const name = rawPlayer.split("#")[0].trim();
-    const player = await prisma.player.findFirst({
-      where: { riotId: { equals: name, mode: "insensitive" } },
-    });
-    if (!player) {
-      await interaction.editReply(`Não achei nenhum player com o Riot ID "${rawPlayer}".`);
-      return;
-    }
-    playerIds = [player.id];
-    scopeLabel = player.riotId;
+  const target = await resolvePlayer(interaction);
+  if (target.kind === "notfound") {
+    await interaction.editReply(`Não achei nenhum player com o Riot ID "${target.raw}".`);
+    return;
   }
+  const playerIds = target.kind === "player" ? [target.id] : undefined;
+  const scopeLabel = target.kind === "player" ? target.riotId : "grupo";
 
   const histories = await buildRankHistory(periodo, { playerIds });
   if (histories.every((h) => h.points.length === 0)) {
@@ -60,6 +94,11 @@ async function handleHistorico(interaction: ChatInputCommandInteraction): Promis
 export async function handleInteraction(interaction: Interaction): Promise<void> {
   if (interaction.isChatInputCommand() && interaction.commandName === "historico") {
     await handleHistorico(interaction);
+    return;
+  }
+
+  if (interaction.isChatInputCommand() && interaction.commandName === "resumo") {
+    await handleResumo(interaction);
     return;
   }
 

@@ -7,6 +7,7 @@ import {
   getActiveGameByPuuid,
 } from "../riot/endpoints";
 import { rankToValue } from "../riot/rank";
+import { extractMatchDetail, detailColumns } from "../riot/matchDetail";
 import { CHALLENGE_START } from "./leaderboard";
 
 const RANKED_SOLO_QUEUE = "RANKED_SOLO_5x5";
@@ -107,22 +108,26 @@ async function pollMatches(player: Player): Promise<void> {
     const participant = matchDetail.info.participants.find((p) => p.puuid === player.puuid);
     if (!participant) continue;
 
-    const playedAt = new Date(matchDetail.info.gameEndTimestamp ?? matchDetail.info.gameCreation);
-    const isRemake = participant.gameEndedInEarlySurrender;
+    const detail = extractMatchDetail(matchDetail, player.puuid)!;
+    const playedAt = detail.playedAt;
+    const isRemake = detail.remake;
+
+    const matchDetailData = detailColumns(detail);
 
     await prisma.match.upsert({
       where: { playerId_matchId: { playerId: player.id, matchId } },
-      update: {},
+      update: matchDetailData,
       create: {
         matchId,
         playerId: player.id,
-        win: participant.win,
-        kills: participant.kills,
-        deaths: participant.deaths,
-        assists: participant.assists,
-        champion: participant.championName,
+        win: detail.win,
+        kills: detail.kills,
+        deaths: detail.deaths,
+        assists: detail.assists,
+        champion: detail.champion,
         playedAt,
         remake: isRemake,
+        ...matchDetailData,
       },
     });
 
