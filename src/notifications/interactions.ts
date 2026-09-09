@@ -28,9 +28,13 @@ async function resolvePlayer(interaction: ChatInputCommandInteraction): Promise<
   if (!raw || ALL_PLAYERS_ALIASES.has(raw.toLowerCase())) return { kind: "group" };
 
   const name = raw.split("#")[0].trim();
-  const player = await prisma.player.findFirst({
-    where: { riotId: { equals: name, mode: "insensitive" } },
-  });
+  const player =
+    (await prisma.player.findFirst({
+      where: { riotId: { equals: name, mode: "insensitive" } },
+    })) ??
+    (await prisma.player.findFirst({
+      where: { riotId: { contains: name, mode: "insensitive" } },
+    }));
   if (!player) return { kind: "notfound", raw };
   return { kind: "player", id: player.id, riotId: player.riotId };
 }
