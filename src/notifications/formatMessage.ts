@@ -1,4 +1,5 @@
 import { NotificationType } from "@prisma/client";
+import { formatTierRank } from "../riot/rank";
 import { DiscordButtonSpec, DiscordEmbed, DiscordFile } from "./discord";
 import {
   championIconUrl,
@@ -82,30 +83,6 @@ const COLOR_WIN = 0x2ecc71;
 const COLOR_LOSS = 0xe74c3c;
 const COLOR_LIVE = 0x3498db;
 const FOOTER = { text: "Perainda Tracker" };
-
-const TIER_LABELS: Record<string, string> = {
-  IRON: "Ferro",
-  BRONZE: "Bronze",
-  SILVER: "Prata",
-  GOLD: "Ouro",
-  PLATINUM: "Platina",
-  EMERALD: "Esmeralda",
-  DIAMOND: "Diamante",
-  MASTER: "Mestre",
-  GRANDMASTER: "Grão-Mestre",
-  CHALLENGER: "Desafiante",
-};
-
-const DIVISION_LABELS: Record<string, string> = { IV: "4", III: "3", II: "2", I: "1" };
-const APEX_TIERS = new Set(["MASTER", "GRANDMASTER", "CHALLENGER"]);
-
-/** Ex: "EMERALD"+"III" -> "Esmeralda 3". Tiers sem divisão (Mestre+) não mostram número. */
-export function formatTierRank(tier: string, rank: string): string {
-  const tierLabel = TIER_LABELS[tier.toUpperCase()] ?? tier;
-  if (APEX_TIERS.has(tier.toUpperCase())) return tierLabel;
-  const divisionLabel = DIVISION_LABELS[rank.toUpperCase()] ?? rank;
-  return `${tierLabel} ${divisionLabel}`;
-}
 
 function formatDuration(totalSeconds: number): string {
   const minutes = Math.floor(totalSeconds / 60);

@@ -36,14 +36,16 @@ Referência de arquitetura/schema: `CLAUDE.MD`.
 - [x] Testado contra a API real com os 3 players cadastrados: 23 partidas novas detectadas e salvas na primeira rodada; segunda rodada não duplicou nada (idempotência confirmada).
 
 ## Fase 4 — Notificações
-- [ ] Função de envio pro Discord via webhook (mensagem formatada por tipo de evento).
-- [ ] Dispatcher: pega `NotificationEvent` `PENDING` de players `REALTIME`, envia na hora, marca `SENT`.
-- [ ] Job de resumo diário: junta `PENDING` de players `DAILY_SUMMARY`, manda uma mensagem só, marca `SENT`.
+- [x] `src/notifications/discord.ts`: envio via webhook, com chunking (limite de 2000 chars) e retry automático em `429` (`retry_after`).
+- [x] `src/notifications/formatMessage.ts`: formata cada `NotificationType` (`MATCH`, `RANK_CHANGE`, `LIVE_GAME`) numa linha de mensagem.
+- [x] `dispatchRealtimeNotifications()` (`src/jobs/dispatchNotifications.ts`): pega `NotificationEvent` `PENDING` de players `REALTIME`, envia (com delay entre mensagens pra não estourar rate limit do webhook), marca `SENT`. Rodando automaticamente após cada ciclo de polling (`runPollCycle` no scheduler).
+- [x] `dispatchDailySummaries()`: junta `PENDING` de players `DAILY_SUMMARY` numa única mensagem por player, envia, marca `SENT`. Agendado via cron separado (`DAILY_SUMMARY_CRON_EXPRESSION`, default 22h).
+- [x] Testado contra o Discord real: 23 mensagens do backlog da Fase 3 enviadas com sucesso, confirmado visualmente no canal.
 - [ ] WhatsApp fica pra depois (fora do MVP) — Discord webhook é o canal inicial.
 
 ## Fase 5 — Rodando de Ponta a Ponta
-- [ ] Rodar o processo localmente com 1-2 players reais e validar as notificações chegando no Discord.
-- [ ] Ajustar intervalos de polling / mensagens conforme uso real.
+- [x] Rodar o processo localmente com os 3 players reais e validar as notificações chegando no Discord — confirmado.
+- [ ] Deixar rodando por mais tempo (`npm run dev`, ciclo automático a cada 5min) e ajustar intervalos/mensagens conforme uso real.
 
 ## Fase 6 — Deploy na VPS
 - [ ] `Dockerfile` do serviço Node (build + start).
@@ -53,6 +55,22 @@ Referência de arquitetura/schema: `CLAUDE.MD`.
 - [ ] Subir com `docker compose up -d`, rodar a migration em produção.
 - [ ] Validar notificações chegando no Discord a partir da VPS.
 - [ ] Fluxo de atualização: `git pull && docker compose up -d --build`.
+
+## Fase 7 — Gráfico de rank ao longo do tempo
+- [x] `src/jobs/rankHistory.ts`: `buildRankHistory(granularity)` agrupa os `RankSnapshot`
+  por dia/semana/mês (fuso `America/Sao_Paulo`), faz forward-fill pra alinhar as séries
+  entre players e usa o rank corrente do `Player` como último ponto. Índice
+  `@@index([playerId, capturedAt])` adicionado (migration `ranksnapshot_history_index`).
+- [x] `src/notifications/rankChart.ts`: monta um SVG (linha por player, rótulos de elo/LP
+  tipo op.gg) e rasteriza em PNG com `@resvg/resvg-js`. Alpine precisa de fontes —
+  `ttf-dejavu` + `fontconfig` adicionados ao `Dockerfile`.
+- [x] Slash command `/historico periodo:[diário|semanal|mensal] player:[Riot ID opcional]`
+  (`discordBot.ts` + `interactions.ts`). Sem `player` = todas as linhas sobrepostas.
+- [x] Script de preview local: `npx tsx src/scripts/rank-chart-once.ts [semanal|diario|mensal] [riotId]`
+  → grava `rank-chart.png`.
+- [x] Anexo opcional do gráfico semanal no leaderboard diário, atrás de `LEADERBOARD_CHART=1`.
+- [ ] Encher o histórico: hoje só tem ~5 dias de dados reais (19–23/08) porque o polling
+  não ficou rodando. Depende da Fase 5 (deixar o processo de pé) pro gráfico ganhar corpo.
 
 ## Depois (fora do escopo inicial)
 - [ ] Integração WhatsApp.

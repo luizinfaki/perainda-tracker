@@ -1,4 +1,11 @@
-import { Client, Events, GatewayIntentBits, Interaction, TextChannel } from "discord.js";
+import {
+  ApplicationCommandOptionType,
+  Client,
+  Events,
+  GatewayIntentBits,
+  Interaction,
+  TextChannel,
+} from "discord.js";
 
 let client: Client | null = null;
 let readyPromise: Promise<void> | null = null;
@@ -57,5 +64,30 @@ export async function registerSlashCommands(): Promise<void> {
     channel.guildId
   );
 
-  console.log("[discord-bot] Slash command /rank registrado.");
+  await getClient().application?.commands.create(
+    {
+      name: "historico",
+      description: "Gráfico de elo ao longo do tempo",
+      options: [
+        {
+          name: "periodo",
+          description: "Como agrupar no tempo (padrão: semanal)",
+          type: ApplicationCommandOptionType.String,
+          choices: [
+            { name: "diário", value: "daily" },
+            { name: "semanal", value: "weekly" },
+            { name: "mensal", value: "monthly" },
+          ],
+        },
+        {
+          name: "player",
+          description: "Riot ID de um player específico (vazio = todos sobrepostos)",
+          type: ApplicationCommandOptionType.String,
+        },
+      ],
+    },
+    channel.guildId
+  );
+
+  console.log("[discord-bot] Slash commands /rank e /historico registrados.");
 }

@@ -1,5 +1,5 @@
 import { DiscordEmbed } from "./discord";
-import { formatTierRank } from "./formatMessage";
+import { formatTierRank } from "../riot/rank";
 
 export interface LeaderboardEntry {
   riotId: string;

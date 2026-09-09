@@ -13,6 +13,9 @@ RUN npm run build
 FROM node:22-alpine
 WORKDIR /app
 
+# Fontes pro @resvg/resvg-js renderizar texto nos gráficos (alpine não traz nenhuma).
+RUN apk add --no-cache ttf-dejavu fontconfig
+
 COPY package*.json ./
 COPY prisma ./prisma
 RUN npm ci --omit=dev

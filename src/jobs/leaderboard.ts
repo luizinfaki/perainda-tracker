@@ -2,6 +2,8 @@ import { prisma } from "../db/client";
 import { rankToValue } from "../riot/rank";
 import { sendCard } from "../notifications/discord";
 import { buildLeaderboardEmbed, LeaderboardEntry } from "../notifications/leaderboard";
+import { buildRankHistory } from "./rankHistory";
+import { renderRankHistoryPng } from "../notifications/rankChart";
 
 const DEFAULT_CHALLENGE_START = "2026-08-18";
 export const CHALLENGE_START = new Date(
@@ -50,6 +52,25 @@ export async function postLeaderboard(): Promise<void> {
     return;
   }
 
-  await sendCard(buildLeaderboardEmbed(entries, CHALLENGE_START));
+  const embed = buildLeaderboardEmbed(entries, CHALLENGE_START);
+
+  if (process.env.LEADERBOARD_CHART === "1") {
+    try {
+      const histories = await buildRankHistory("weekly");
+      if (histories.some((h) => h.points.length > 0)) {
+        const png = renderRankHistoryPng(histories, "weekly");
+        embed.image = { url: "attachment://historico.png" };
+        await sendCard(embed, {
+          files: [{ name: "historico.png", data: png, contentType: "image/png" }],
+        });
+        console.log(`[leaderboard] Leaderboard + gráfico postados (${entries.length} player(s)).`);
+        return;
+      }
+    } catch (err) {
+      console.error("[leaderboard] Falha ao gerar o gráfico, postando só o texto:", err);
+    }
+  }
+
+  await sendCard(embed);
   console.log(`[leaderboard] Leaderboard postado (${entries.length} player(s)).`);
 }

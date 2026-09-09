@@ -64,6 +64,8 @@ model RankSnapshot {
   lpChange   Int
   lpBalance  Int
   capturedAt DateTime @default(now())
+
+  @@index([playerId, capturedAt])
 }
 
 model NotificationEvent {
